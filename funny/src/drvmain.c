@@ -1,4 +1,5 @@
 #include "printf.h"
+#include "protected.h"
 #include "serial.h"
 #include <ntddk.h>
 #include <stdbool.h>
@@ -89,7 +90,7 @@ static bool readFileToMemory(const char *path, char *buffer, size_t size) {
         if (NT_SUCCESS(ntstatus)) {
             buffer[size - 1] = '\0';
 
-            printf_serial("%s\n", buffer);
+            printf_serial("FILE: %s\n", buffer);
         } else {
             printf_serial("could not read from file\n");
             return false;
@@ -102,47 +103,91 @@ static bool readFileToMemory(const char *path, char *buffer, size_t size) {
     }
 }
 
+// osdev discord gdt
+static uint64_t gdt[] = {
+    0x0000000000000000, // null
+    0x00009a000000ffff, // 16-bit code
+    0x000093000000ffff, // 16-bit data
+    0x00cf9a000000ffff, // 32-bit code
+    0x00cf93000000ffff, // 32-bit data
+    0x00af9b000000ffff, // 64-bit code
+    0x00af93000000ffff, // 64-bit data
+    0x00affb000000ffff, // usermode 64-bit code
+    0x00aff3000000ffff  // usermode 64-bit data
+    /* at some stage (presumably when starting to work on usermode) you'll need at least one TSS desriptor
+     * in order to set that up, you'll need some knowledge of the segment descriptor and TSS layout */
+};
+
+void loadgdt() {
+    struct __attribute__((packed)) {
+        uint16_t size;
+        uint64_t *base;
+    } gdtr = {sizeof(gdt) - 1, gdt};
+
+    asm volatile("lgdt %0" ::"m"(gdtr));
+}
+
 VOID UnloadRoutine(IN PDRIVER_OBJECT DriverObject) {
     serial_init();
     printf_serial("\ntrying to take over kernel\n");
 
-    PHYSICAL_ADDRESS phyMax;
-    phyMax.QuadPart = 0xFFFFFFFF;
-    void *virtual = MmAllocateContiguousMemory(10000000, phyMax);
+    PHYSICAL_ADDRESS phy32Max;
+    phy32Max.QuadPart = 0xFFFFFFFF;
+    void *stage2 = MmAllocateContiguousMemory(10000000, phy32Max);
 
-    if (virtual == NULL) {
+    if (stage2 == NULL) {
         printf_serial("could not allocate memory\n");
         printf_serial("returning control to NT kernel\n");
         return;
     }
 
-    void *physical = MmGetPhysicalAddress(virtual).QuadPart;
+    void *physical = MmGetPhysicalAddress(stage2).QuadPart;
 
-    printf_serial("mapped 0x%p (MmGetPhysicalAddress: 0x%p)\n", virtual, physical);
+    printf_serial("mapped 0x%p (MmGetPhysicalAddress: 0x%p)\n", stage2, physical);
 
-    printf_serial("filesize: %u\n", getFileSize(L"\\DosDevices\\C:\\example.txt"));
+    printf_serial("filesize: %u\n", getFileSize(L"\\DosDevices\\C:\\Documents and Settings\\Administrator\\Desktop\\Downloads\\stage2.bin"));
 
-    if (!readFileToMemory(L"\\DosDevices\\C:\\example.txt", (char *)virtual, 1000000)) {
-        printf_serial("could not read file\n");
+    if (!readFileToMemory(L"\\DosDevices\\C:\\Documents and Settings\\Administrator\\Desktop\\Downloads\\stage2.bin", (char *)stage2, 1000000)) {
+        printf_serial("could not read stage 2 file\n");
         printf_serial("returning control to NT kernel\n");
         return;
     }
 
-    uint64_t cr3;
-    asm volatile("mov %%cr3, %0"
-                 : "=r"(cr3)
-                 :);
-    uint64_t cr4;
-    asm volatile("mov %%cr4, %0"
-                 : "=r"(cr4)
-                 :);
-
-    printf_serial("cr3: 0x%p cr4: 0x%p\n", cr3, (uintptr_t)cr4);
-
-    printf_serial("returning control to NT kernel\n");
-    return;
-
-    while (1) {
-        asm volatile("cli;hlt");
+    // build memory map
+    PPHYSICAL_MEMORY_RANGE phys_mem_ranges = MmGetPhysicalMemoryRanges();
+    printf_serial("memory map:\n");
+    int map_count = 0;
+    while ((phys_mem_ranges[map_count].BaseAddress.QuadPart != 0) && (phys_mem_ranges[map_count].NumberOfBytes.QuadPart != 0)) {
+        printf_serial("    -> [%d] b: 0x%p len: 0x%p\n", map_count, phys_mem_ranges[map_count].BaseAddress.QuadPart, phys_mem_ranges[map_count].NumberOfBytes.QuadPart);
+        map_count++;
     }
+    struct __attribute__((packed)) memmap_entry {
+        uint64_t base;
+        uint64_t size;
+    };
+    struct memmap_entry *memmap = MmAllocateContiguousMemory(sizeof(struct memmap_entry) * (map_count + 1), phy32Max);
+    if (memmap == NULL) {
+        printf_serial("could not allocate memory\n");
+        printf_serial("returning control to NT kernel\n");
+        return;
+    }
+    // terminating entry
+    memmap[map_count].base = 0;
+    memmap[map_count].size = 0;
+    for (int i = 0; i < map_count; i++) {
+        memmap[i].base = phys_mem_ranges[map_count].BaseAddress.QuadPart;
+        memmap[i].size = phys_mem_ranges[map_count].NumberOfBytes.QuadPart;
+    }
+
+    // jump to protected mode
+    printf_serial("loading GDT\n");
+    loadgdt();
+    printf_serial("loaded GDT\n");
+    printf_serial("switching to protected mode\n");
+
+    uint64_t jmp_addr = MmGetPhysicalAddress(stage2).QuadPart;
+    uint64_t mem_map_ptr = MmGetPhysicalAddress(memmap).QuadPart;
+    uint64_t stack_ptr = 0x2000;
+    printf_serial("entering protected mode (jump: 0x%p, memmap: 0x%p, stack: 0x%p)\n", jmp_addr, mem_map_ptr, stack_ptr);
+    switchtoprotected(jmp_addr, mem_map_ptr, stack_ptr);
 }

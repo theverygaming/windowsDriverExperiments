@@ -5,7 +5,8 @@ LDFLAGS += -nostdlib -nostartfiles -shared -lntoskrnl -Wl,--entry,DriverEntry # 
 CFILES = src/drvmain.c \
 		 src/cpu.c \
 		 src/serial.c \
-		 src/printf.c 
+		 src/printf.c \
+		 src/protected.S
 
 OBJS = $(addsuffix .o, $(basename $(CFILES)))
 
@@ -14,6 +15,9 @@ all: drv.sys
 
 drv.sys: $(OBJS)
 	$(CC) -o $@ $(OBJS) $(LDFLAGS)
+
+%.o: %.S
+	$(CC) -o $@ -c $< $(CFLAGS)
 
 %.o: %.c
 	$(CC) -o $@ -c $< $(CFLAGS)
