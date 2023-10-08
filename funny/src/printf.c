@@ -1,4 +1,5 @@
 #include "printf.h"
+#include "cpu.h"
 #include "serial.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -7,6 +8,7 @@
 static void myputs(const char *str, bool debugonly) {
     while (*str) {
         serial_putc(*str);
+        outb(0xE9, *str);
         str++;
     }
 }

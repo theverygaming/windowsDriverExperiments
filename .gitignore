@@ -1,4 +1,7 @@
 *.o
+*.bin
 *.sys
 
 .vscode/
+
+/mingw-w64/

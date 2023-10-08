@@ -24,3 +24,5 @@ mov %eax, %cr0
 
 mov %esi, %eax // mem_map_ptr in %eax
 jmpl *%edi
+.global switchtoprotected_end
+switchtoprotected_end:

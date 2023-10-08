@@ -1,3 +1,5 @@
+#define __INTRINSIC_DEFINED__InterlockedAdd64
+#include "paging.h"
 #include "printf.h"
 #include "protected.h"
 #include "serial.h"
@@ -127,23 +129,24 @@ void loadgdt() {
     asm volatile("lgdt %0" ::"m"(gdtr));
 }
 
+extern uint8_t switchtoprotected_end;
+
 VOID UnloadRoutine(IN PDRIVER_OBJECT DriverObject) {
     serial_init();
-    printf_serial("\ntrying to take over kernel\n");
+    printf_serial("\n:trolley:\n");
 
     PHYSICAL_ADDRESS phy32Max;
     phy32Max.QuadPart = 0xFFFFFFFF;
+    void *stage1 = MmAllocateContiguousMemory(10000000, phy32Max);
     void *stage2 = MmAllocateContiguousMemory(10000000, phy32Max);
 
-    if (stage2 == NULL) {
+    if (stage1 == NULL || stage2 == NULL) {
         printf_serial("could not allocate memory\n");
         printf_serial("returning control to NT kernel\n");
         return;
     }
 
-    void *physical = MmGetPhysicalAddress(stage2).QuadPart;
-
-    printf_serial("mapped 0x%p (MmGetPhysicalAddress: 0x%p)\n", stage2, physical);
+    printf_serial("mapped 0x%p (MmGetPhysicalAddress: 0x%p)\n", stage2, MmGetPhysicalAddress(stage2).QuadPart);
 
     printf_serial("filesize: %u\n", getFileSize(L"\\DosDevices\\C:\\Documents and Settings\\Administrator\\Desktop\\Downloads\\stage2.bin"));
 
@@ -179,15 +182,20 @@ VOID UnloadRoutine(IN PDRIVER_OBJECT DriverObject) {
         memmap[i].size = phys_mem_ranges[map_count].NumberOfBytes.QuadPart;
     }
 
-    // jump to protected mode
-    printf_serial("loading GDT\n");
-    loadgdt();
-    printf_serial("loaded GDT\n");
-    printf_serial("switching to protected mode\n");
+    uint64_t stage1_phys = MmGetPhysicalAddress(stage1).QuadPart;
+    printf_serial("physicall address of stage1: 0x%p\n", stage1_phys);
+    memcpy(stage1, switchtoprotected, (uint64_t)&switchtoprotected_end - (uint64_t)switchtoprotected);
+    void __attribute__((sysv_abi)) (*switchtoprotected_ptr)(uint64_t jmp, uint64_t mem_map_ptr, uint64_t stack_ptr) = stage1_phys;
 
     uint64_t jmp_addr = MmGetPhysicalAddress(stage2).QuadPart;
     uint64_t mem_map_ptr = MmGetPhysicalAddress(memmap).QuadPart;
     uint64_t stack_ptr = 0x2000;
     printf_serial("entering protected mode (jump: 0x%p, memmap: 0x%p, stack: 0x%p)\n", jmp_addr, mem_map_ptr, stack_ptr);
-    switchtoprotected(jmp_addr, mem_map_ptr, stack_ptr);
+    map_addr_n(stage1_phys, stage1_phys, (((uint64_t)&switchtoprotected_end - (uint64_t)switchtoprotected) / 4096) + 1);
+    // jump to protected mode
+    printf_serial("loading GDT\n");
+    loadgdt();
+    printf_serial("loaded GDT\n");
+    printf_serial("switching to protected mode\n");
+    switchtoprotected_ptr(jmp_addr, mem_map_ptr, stack_ptr);
 }
