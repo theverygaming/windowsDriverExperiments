@@ -138,7 +138,10 @@ VOID UnloadRoutine(IN PDRIVER_OBJECT DriverObject) {
     PHYSICAL_ADDRESS phy32Max;
     phy32Max.QuadPart = 0xFFFFFFFF;
     void *stage1 = MmAllocateContiguousMemory(10000000, phy32Max);
-    void *stage2 = MmAllocateContiguousMemory(10000000, phy32Max);
+    //void *stage2 = MmAllocateContiguousMemory(10000000, phy32Max);
+    PHYSICAL_ADDRESS stage2addr;
+    stage2addr.QuadPart = 0x00000500;
+    void *stage2 = MmMapIoSpace(stage2addr, 400000, MmNonCached);
 
     if (stage1 == NULL || stage2 == NULL) {
         printf_serial("could not allocate memory\n");
@@ -150,7 +153,7 @@ VOID UnloadRoutine(IN PDRIVER_OBJECT DriverObject) {
 
     printf_serial("filesize: %u\n", getFileSize(L"\\DosDevices\\C:\\Documents and Settings\\Administrator\\Desktop\\Downloads\\stage2.bin"));
 
-    if (!readFileToMemory(L"\\DosDevices\\C:\\Documents and Settings\\Administrator\\Desktop\\Downloads\\stage2.bin", (char *)stage2, 1000000)) {
+    if (!readFileToMemory(L"\\DosDevices\\C:\\Documents and Settings\\Administrator\\Desktop\\Downloads\\stage2.bin", (char *)stage2, 400000)) {
         printf_serial("could not read stage 2 file\n");
         printf_serial("returning control to NT kernel\n");
         return;

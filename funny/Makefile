@@ -12,10 +12,7 @@ CFILES = src/drvmain.c \
 OBJS = $(addsuffix .o, $(basename $(CFILES)))
 
 .PHONY: all
-all: drv.sys stage2.bin
-
-stage2.bin: stage2.nasm
-	nasm -f bin $< -o $@
+all: drv.sys
 
 drv.sys: $(OBJS)
 	$(CC) -o $@ $(OBJS) $(LDFLAGS)

@@ -7,6 +7,7 @@ in stdenv.mkDerivation {
     in
     [
       pkgsCross.mingwW64.buildPackages.gcc
+      pkgsCross.i686-embedded.buildPackages.gcc
 
       gnumake
 
